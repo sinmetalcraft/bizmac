@@ -1,0 +1,59 @@
+project: my-project
+location: asia-northeast1
+
+# 全ジョブに適用する、変更を無視するプロパティ。
+# Cloud Scheduler が自動で埋める値や、コンソールから運用で変える値を書いておく。
+ignore_change:
+  - http_target.headers.User-Agent
+
+jobs:
+  # HTTP エンドポイントを叩くジョブ。body は生の文字列で書く。
+  - name: nightly-batch
+    description: 毎晩のバッチ処理
+    schedule: "0 3 * * *"
+    time_zone: Asia/Tokyo
+    attempt_deadline: 3m0s
+    retry_config:
+      retry_count: 3
+      min_backoff_duration: 5s
+      max_backoff_duration: 1h0m0s
+      max_doublings: 5
+    http_target:
+      uri: https://batch.example.com/run
+      http_method: POST
+      headers:
+        Content-Type: application/json
+      body: |
+        {"kind": "batch", "target": "users"}
+      oidc_token:
+        service_account_email: scheduler@my-project.iam.gserviceaccount.com
+        audience: https://batch.example.com
+
+  # Cloud Run を叩くジョブ。body は body_json で構造化して書く。
+  - name: hourly-sync
+    schedule: "0 * * * *"
+    time_zone: Asia/Tokyo
+    # このジョブだけ description の変更を無視する。
+    ignore_change:
+      - description
+    http_target:
+      uri: https://sync-xxxxxxxxxx-an.a.run.app/sync
+      http_method: POST
+      body_json:
+        kind: sync
+        targets:
+          - users
+          - orders
+      oidc_token:
+        service_account_email: scheduler@my-project.iam.gserviceaccount.com
+
+  # Pub/Sub にメッセージを publish するジョブ。
+  - name: notify
+    schedule: "*/30 * * * *"
+    time_zone: Asia/Tokyo
+    pubsub_target:
+      topic_name: projects/my-project/topics/notify
+      data_json:
+        message: hello
+      attributes:
+        origin: bizmac
