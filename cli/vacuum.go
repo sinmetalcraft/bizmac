@@ -3,48 +3,48 @@ package cli
 import (
 	"fmt"
 
-	"github.com/sinmetalcraft/bizmac/scheduler"
+	"github.com/sinmetalcraft/bizmac/resource"
 	"github.com/spf13/cobra"
 )
 
 func newVacuumCmd() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "vacuum",
 		Short: "yaml に定義の無いリソースを Google Cloud から削除する",
 	}
-	cmd.AddCommand(newVacuumSchedulerCmd())
-	return cmd
 }
 
-func newVacuumSchedulerCmd() *cobra.Command {
+func newVacuumCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 	var (
 		flags  targetFlags
 		dryRun bool
 		yes    bool
 	)
 	cmd := &cobra.Command{
-		Use:   "scheduler",
-		Short: "yaml に定義の無い Cloud Scheduler のジョブを削除する",
-		Long: "Google Cloud にあって yaml に定義が無いジョブを削除する。\n" +
+		Use:   k.name,
+		Short: fmt.Sprintf("yaml に定義の無い %sを削除する", k.resourceLabel),
+		Long: fmt.Sprintf("Google Cloud にあって yaml に定義が無い%sを削除する。\n", k.itemLabel) +
 			"削除だけを行い、追加・更新はしない。",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			plan, err := buildSchedulerPlan(cmd, &flags)
+			plan, err := buildPlan(cmd, k, &flags)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "project:  %s\n", plan.Project)
-			fmt.Fprintf(out, "location: %s\n\n", plan.Location)
+			printHeader(out, plan)
 
 			if len(plan.Delete) == 0 {
-				fmt.Fprintln(out, "削除対象のジョブはありません。")
+				fmt.Fprintf(out, "削除対象の%sはありません。\n", k.itemLabel)
 				return nil
 			}
-			for _, j := range plan.Delete {
-				fmt.Fprintf(out, "- %s\n", j.Name)
+			for _, item := range plan.Delete {
+				fmt.Fprintf(out, "- %s\n", item.ItemName())
 			}
-			fmt.Fprintf(out, "\n%d 件のジョブが削除対象です。\n", len(plan.Delete))
+			fmt.Fprintf(out, "\n%d 件の%sが削除対象です。\n", len(plan.Delete), k.itemLabel)
+			if k.vacuumWarning != "" {
+				fmt.Fprintf(out, "警告: %s\n", k.vacuumWarning)
+			}
 
 			if dryRun {
 				fmt.Fprintln(out, "--dry-run のため削除しませんでした。")
@@ -62,22 +62,22 @@ func newVacuumSchedulerCmd() *cobra.Command {
 			}
 
 			ctx := cmd.Context()
-			svc, err := scheduler.NewService(ctx)
+			svc, err := k.newService(ctx)
 			if err != nil {
 				return err
 			}
 			defer svc.Close()
 
-			for _, j := range plan.Delete {
-				if err := svc.Delete(ctx, plan.Project, plan.Location, j.Name); err != nil {
+			for _, item := range plan.Delete {
+				if err := svc.Delete(ctx, plan.Project, plan.Location, item.ItemName()); err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "deleted %s\n", j.Name)
+				fmt.Fprintf(out, "deleted %s\n", item.ItemName())
 			}
 			return nil
 		},
 	}
-	flags.bind(cmd, scheduler.DefaultFileName)
+	flags.bind(cmd, k.defaultFile)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "削除せずに対象だけを表示する")
 	cmd.Flags().BoolVar(&yes, "yes", false, "確認をスキップして削除する")
 	return cmd
