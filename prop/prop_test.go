@@ -122,3 +122,45 @@ func TestChangeString(t *testing.T) {
 		}
 	}
 }
+
+func TestCopyPathIfAbsent(t *testing.T) {
+	actual := map[string]any{
+		"rate_limits": map[string]any{
+			"max_dispatches_per_second": 500,
+			"max_concurrent_dispatches": 1000,
+		},
+		"task_ttl": "744h0m0s",
+	}
+
+	// dst に書いてある値は残り、書いていない値だけ src から入る。
+	desired := map[string]any{
+		"rate_limits": map[string]any{"max_dispatches_per_second": 10},
+	}
+	for _, path := range []string{
+		"rate_limits.max_dispatches_per_second",
+		"rate_limits.max_concurrent_dispatches",
+		"task_ttl",
+	} {
+		prop.CopyPathIfAbsent(desired, actual, path)
+	}
+
+	rl, _ := desired["rate_limits"].(map[string]any)
+	if rl["max_dispatches_per_second"] != 10 {
+		t.Errorf("max_dispatches_per_second = %v, want 10 (yaml の値が残る)", rl["max_dispatches_per_second"])
+	}
+	if rl["max_concurrent_dispatches"] != 1000 {
+		t.Errorf("max_concurrent_dispatches = %v, want 1000 (現状の値が入る)", rl["max_concurrent_dispatches"])
+	}
+	if desired["task_ttl"] != "744h0m0s" {
+		t.Errorf("task_ttl = %v, want 744h0m0s (現状の値が入る)", desired["task_ttl"])
+	}
+}
+
+func TestCopyPathIfAbsent_missingInBoth(t *testing.T) {
+	// どちらにも無いパスを写しても、中間ノードを作らない。
+	desired := map[string]any{}
+	prop.CopyPathIfAbsent(desired, map[string]any{}, "retry_config.max_attempts")
+	if len(desired) != 0 {
+		t.Errorf("desired = %v, want 空", desired)
+	}
+}

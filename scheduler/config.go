@@ -295,3 +295,45 @@ func (j *Job) TargetKind() string {
 		return ""
 	}
 }
+
+// ItemName は resource.Item の実装。
+func (j *Job) ItemName() string { return j.Name }
+
+// ItemIgnoreChange は resource.Item の実装。
+func (j *Job) ItemIgnoreChange() []string { return j.IgnoreChange }
+
+// SetItemIgnoreChange は resource.Item の実装。
+func (j *Job) SetItemIgnoreChange(paths []string) { j.IgnoreChange = paths }
+
+// Canonicalize は resource.Item の実装。
+func (j *Job) Canonicalize() error { return j.canonicalizePayloads() }
+
+// RecreateKey は resource.Item の実装。ジョブはターゲット種別を変えられない。
+func (j *Job) RecreateKey() string { return j.TargetKind() }
+
+// GetProject は resource.File の実装。
+func (f *File) GetProject() string { return f.Project }
+
+// SetProject は resource.File の実装。
+func (f *File) SetProject(project string) { f.Project = project }
+
+// GetLocation は resource.File の実装。
+func (f *File) GetLocation() string { return f.Location }
+
+// SetLocation は resource.File の実装。
+func (f *File) SetLocation(location string) { f.Location = location }
+
+// GetIgnoreChange は resource.File の実装。
+func (f *File) GetIgnoreChange() []string { return f.IgnoreChange }
+
+// SetIgnoreChange は resource.File の実装。
+func (f *File) SetIgnoreChange(paths []string) { f.IgnoreChange = paths }
+
+// GetItems は resource.File の実装。
+func (f *File) GetItems() []*Job { return f.Jobs }
+
+// SetItems は resource.File の実装。
+func (f *File) SetItems(jobs []*Job) { f.Jobs = jobs }
+
+// Sort は resource.File の実装。
+func (f *File) Sort() { f.SortJobs() }

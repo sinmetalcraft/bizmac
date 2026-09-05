@@ -3,32 +3,30 @@ package cli
 import (
 	"fmt"
 
-	"github.com/sinmetalcraft/bizmac/scheduler"
+	"github.com/sinmetalcraft/bizmac/resource"
 	"github.com/spf13/cobra"
 )
 
 func newUpdateCmd() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "update",
 		Short: "yaml のリソースを Google Cloud に反映する (追加・更新のみ)",
 	}
-	cmd.AddCommand(newUpdateSchedulerCmd())
-	return cmd
 }
 
-func newUpdateSchedulerCmd() *cobra.Command {
+func newUpdateCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 	var (
 		flags  targetFlags
 		dryRun bool
 	)
 	cmd := &cobra.Command{
-		Use:   "scheduler",
-		Short: "Cloud Scheduler のジョブを追加・更新する",
-		Long: "yaml に定義されたジョブを Google Cloud に反映する。追加と更新だけを行い、削除はしない。\n" +
-			"yaml に無いジョブを削除したい場合は vacuum を使う。",
+		Use:   k.name,
+		Short: fmt.Sprintf("%sを追加・更新する", k.resourceLabel),
+		Long: fmt.Sprintf("yaml に定義された%sを Google Cloud に反映する。追加と更新だけを行い、削除はしない。\n", k.itemLabel) +
+			fmt.Sprintf("yaml に無い%sを削除したい場合は vacuum を使う。", k.itemLabel),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			plan, err := buildSchedulerPlan(cmd, &flags)
+			plan, err := buildPlan(cmd, k, &flags)
 			if err != nil {
 				return err
 			}
@@ -40,10 +38,10 @@ func newUpdateSchedulerCmd() *cobra.Command {
 				return nil
 			}
 			for _, u := range plan.Update {
-				if u.TargetKindChanged {
-					return fmt.Errorf("ジョブ %q はターゲット種別が %s から %s へ変わっています。"+
+				if u.RecreateRequired {
+					return fmt.Errorf("%s %q は種別が %s から %s へ変わっています。"+
 						"update では変更できないので、一度削除して作り直してください",
-						u.Name, u.Actual.TargetKind(), u.Desired.TargetKind())
+						k.itemLabel, u.Name, u.Actual.RecreateKey(), u.Desired.RecreateKey())
 				}
 			}
 			if dryRun {
@@ -52,21 +50,21 @@ func newUpdateSchedulerCmd() *cobra.Command {
 			}
 
 			ctx := cmd.Context()
-			svc, err := scheduler.NewService(ctx)
+			svc, err := k.newService(ctx)
 			if err != nil {
 				return err
 			}
 			defer svc.Close()
 
 			fmt.Fprintln(out)
-			for _, j := range plan.Create {
-				if err := svc.Create(ctx, plan.Project, plan.Location, j); err != nil {
+			for _, item := range plan.Create {
+				if err := svc.Create(ctx, plan.Project, plan.Location, item); err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "created %s\n", j.Name)
+				fmt.Fprintf(out, "created %s\n", item.ItemName())
 			}
 			for _, u := range plan.Update {
-				if err := svc.Update(ctx, plan.Project, plan.Location, u.Desired); err != nil {
+				if err := svc.Update(ctx, plan.Project, plan.Location, u.Desired, u.Changes); err != nil {
 					return err
 				}
 				fmt.Fprintf(out, "updated %s\n", u.Name)
@@ -74,7 +72,7 @@ func newUpdateSchedulerCmd() *cobra.Command {
 			return nil
 		},
 	}
-	flags.bind(cmd, scheduler.DefaultFileName)
+	flags.bind(cmd, k.defaultFile)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "反映せずに実行内容だけを表示する")
 	return cmd
 }
