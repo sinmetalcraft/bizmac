@@ -144,8 +144,8 @@ func TestBuildPlan_targetKindChanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPlan() error: %v", err)
 	}
-	if len(plan.Update) != 1 || !plan.Update[0].TargetKindChanged {
-		t.Errorf("TargetKindChanged が検出されませんでした: %+v", plan.Update)
+	if len(plan.Update) != 1 || !plan.Update[0].RecreateRequired {
+		t.Errorf("RecreateRequired が検出されませんでした: %+v", plan.Update)
 	}
 }
 

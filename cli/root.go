@@ -7,7 +7,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sinmetalcraft/bizmac/scheduler"
 	"github.com/spf13/cobra"
 )
 
@@ -25,12 +24,19 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(
-		newExportCmd(),
-		newDiffCmd(),
-		newUpdateCmd(),
-		newVacuumCmd(),
-	)
+	export, diff, update, vacuum := newExportCmd(), newDiffCmd(), newUpdateCmd(), newVacuumCmd()
+	// リソース種別を増やすときは kinds に 1 つ足す。
+	kinds := []cmdSet{
+		buildCmds(schedulerKind()),
+		buildCmds(cloudtasksKind()),
+	}
+	for _, k := range kinds {
+		export.AddCommand(k.export)
+		diff.AddCommand(k.diff)
+		update.AddCommand(k.update)
+		vacuum.AddCommand(k.vacuum)
+	}
+	root.AddCommand(export, diff, update, vacuum)
 	return root
 }
 
@@ -45,27 +51,6 @@ func (f *targetFlags) bind(cmd *cobra.Command, defaultFile string) {
 	cmd.Flags().StringVarP(&f.file, "file", "f", defaultFile, "リソース定義の yaml ファイル")
 	cmd.Flags().StringVarP(&f.project, "project", "p", "", "Google Cloud のプロジェクト ID (yaml の project を上書きする)")
 	cmd.Flags().StringVarP(&f.location, "location", "l", "", "ロケーション ID (yaml の location を上書きする)")
-}
-
-// loadSchedulerFile は yaml を読み、フラグで project / location を上書きして返す。
-func (f *targetFlags) loadSchedulerFile() (*scheduler.File, error) {
-	file, err := scheduler.LoadFile(f.file)
-	if err != nil {
-		return nil, err
-	}
-	if f.project != "" {
-		file.Project = f.project
-	}
-	if f.location != "" {
-		file.Location = f.location
-	}
-	if file.Project == "" {
-		return nil, fmt.Errorf("project が指定されていません。%s に project を書くか --project を指定してください", f.file)
-	}
-	if file.Location == "" {
-		return nil, fmt.Errorf("location が指定されていません。%s に location を書くか --location を指定してください", f.file)
-	}
-	return file, nil
 }
 
 // confirm は y/N の確認を取る。EOF や y 以外の入力は false を返す。

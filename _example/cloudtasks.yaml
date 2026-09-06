@@ -1,0 +1,47 @@
+project: my-project
+location: asia-northeast1
+
+queues:
+  # Cloud Tasks で普通に作ったキュー。
+  # rate_limits / retry_config / task_ttl / tombstone_ttl は、書かなければ
+  # Google Cloud 側の値をそのまま使う。管理したいプロパティだけを書けばよい。
+  - name: process-nft
+    rate_limits:
+      max_dispatches_per_second: 500
+      # -1 で無制限。0 も「無制限」という意味のある値なので、
+      # プロパティを書かないことと 0 を書くことは区別される。
+      max_concurrent_dispatches: 1
+    retry_config:
+      max_attempts: -1 # -1 で無制限
+      min_backoff: 100ms
+      max_backoff: 1h0m0s
+      max_doublings: 16
+    stackdriver_logging_config:
+      sampling_ratio: 1
+
+  # HTTP タスクの宛先をキュー単位で上書きするキュー。
+  - name: to-cloud-run
+    rate_limits:
+      max_dispatches_per_second: 100
+    http_target:
+      uri_override:
+        scheme: HTTPS
+        host: task-handler-xxxxxxxxxx-an.a.run.app
+        path_override: /v1/task
+        uri_override_enforce_mode: ALWAYS
+      header_overrides:
+        X-Origin: bizmac
+      oidc_token:
+        service_account_email: tasks@my-project.iam.gserviceaccount.com
+
+  # App Engine のハンドラに投げる、queue.yaml 由来のキュー。
+  - name: backup-datastore
+    # このキューだけ min_backoff の変更を無視する。
+    ignore_change:
+      - retry_config.min_backoff
+    rate_limits:
+      max_dispatches_per_second: 50
+      max_concurrent_dispatches: 1000
+    app_engine_http_queue:
+      app_engine_routing_override:
+        host: ah-builtin-python-bundle.my-project.appspot.com

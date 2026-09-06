@@ -147,6 +147,42 @@ func copyKeys(dst, src any, keys []string) {
 	}
 }
 
+// CopyPathIfAbsent は dst に path の値が無い場合だけ src から写す。
+// Google Cloud が既定値を必ず埋めるうえに未設定へ戻せないプロパティを、
+// 「yaml に書かなければ現状の値をそのまま使う」と解釈するために使う。
+func CopyPathIfAbsent(dst, src any, path string) {
+	keys := splitPath(path)
+	if hasKeys(dst, keys) {
+		return
+	}
+	copyKeys(dst, src, keys)
+}
+
+func hasKeys(node any, keys []string) bool {
+	if len(keys) == 0 {
+		return false
+	}
+	switch n := node.(type) {
+	case map[string]any:
+		v, ok := n[keys[0]]
+		if !ok {
+			return false
+		}
+		if len(keys) == 1 {
+			return true
+		}
+		return hasKeys(v, keys[1:])
+	case []any:
+		// 配列は 1 要素でも持っていれば「ある」とみなす。
+		for _, e := range n {
+			if hasKeys(e, keys) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ChangeType は差分の種類。
 type ChangeType string
 

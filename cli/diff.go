@@ -1,30 +1,48 @@
 package cli
 
 import (
-	"github.com/sinmetalcraft/bizmac/scheduler"
+	"fmt"
+
+	"github.com/sinmetalcraft/bizmac/resource"
 	"github.com/spf13/cobra"
 )
 
 func newDiffCmd() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "diff",
 		Short: "yaml と Google Cloud の現在のリソースの差分を表示する",
 	}
-	cmd.AddCommand(newDiffSchedulerCmd())
-	return cmd
 }
 
-func newDiffSchedulerCmd() *cobra.Command {
+func newDiffCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 	var (
 		flags    targetFlags
 		exitCode bool
+		against  string
 	)
 	cmd := &cobra.Command{
-		Use:   "scheduler",
-		Short: "Cloud Scheduler のジョブの差分を表示する",
+		Use:   k.name,
+		Short: fmt.Sprintf("%sの差分を表示する", k.resourceLabel),
 		Args:  cobra.NoArgs,
+		Long: fmt.Sprintf("yaml に定義された%sと Google Cloud の現状を比較して差分を表示する。\n", k.itemLabel) +
+			"--against に別の yaml を指定した場合は Google Cloud には接続せず、\n" +
+			"--file をあるべき姿、--against を現状としてファイル同士を比較する。",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			plan, err := buildSchedulerPlan(cmd, &flags)
+			if against != "" {
+				fp, err := buildFilePlan(k, flags.file, against)
+				if err != nil {
+					return err
+				}
+				if err := printFilePlan(cmd.OutOrStdout(), flags.file, against, fp); err != nil {
+					return err
+				}
+				if exitCode && (fp.plan.HasChange() || len(fp.plan.Delete) > 0) {
+					return &exitError{code: 1}
+				}
+				return nil
+			}
+
+			plan, err := buildPlan(cmd, k, &flags)
 			if err != nil {
 				return err
 			}
@@ -38,28 +56,9 @@ func newDiffSchedulerCmd() *cobra.Command {
 			return nil
 		},
 	}
-	flags.bind(cmd, scheduler.DefaultFileName)
+	flags.bind(cmd, k.defaultFile)
 	cmd.Flags().BoolVar(&exitCode, "exit-code", false, "差分がある場合に exit code 1 で終了する")
+	cmd.Flags().StringVar(&against, "against", "",
+		"比較対象の yaml ファイル。指定すると Google Cloud ではなくファイル同士を比較する")
 	return cmd
-}
-
-// buildSchedulerPlan は yaml を読み、Google Cloud の現状と突き合わせて Plan を作る。
-func buildSchedulerPlan(cmd *cobra.Command, flags *targetFlags) (*scheduler.Plan, error) {
-	file, err := flags.loadSchedulerFile()
-	if err != nil {
-		return nil, err
-	}
-
-	ctx := cmd.Context()
-	svc, err := scheduler.NewService(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer svc.Close()
-
-	actual, err := svc.List(ctx, file.Project, file.Location)
-	if err != nil {
-		return nil, err
-	}
-	return scheduler.BuildPlan(file, actual)
 }

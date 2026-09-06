@@ -7,6 +7,7 @@ import (
 
 	cloudscheduler "cloud.google.com/go/scheduler/apiv1"
 	schedulerpb "cloud.google.com/go/scheduler/apiv1/schedulerpb"
+	"github.com/sinmetalcraft/bizmac/prop"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
@@ -73,8 +74,8 @@ func (s *Service) Create(ctx context.Context, project, location string, j *Job) 
 	return nil
 }
 
-// Update は既存ジョブを更新する。
-func (s *Service) Update(ctx context.Context, project, location string, j *Job) error {
+// Update は既存ジョブを更新する。changes は使わず、常に決まったフィールドを上書きする。
+func (s *Service) Update(ctx context.Context, project, location string, j *Job, _ []prop.Change) error {
 	pb, err := j.ToProto(project, location)
 	if err != nil {
 		return err
