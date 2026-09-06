@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/sinmetalcraft/bizmac/resource"
 	"github.com/spf13/cobra"
@@ -98,4 +99,68 @@ func buildPlan[T resource.Item](cmd *cobra.Command, k kind[T], flags *targetFlag
 		plan.Notes = n.Notes()
 	}
 	return plan, nil
+}
+
+// filePlan は 2 つの yaml を比較した結果。
+type filePlan[T resource.Item] struct {
+	plan *resource.Plan[T]
+	// file は --file 側 (あるべき姿として扱う)。
+	file resource.File[T]
+	// against は --against 側 (現状として扱う)。
+	against resource.File[T]
+}
+
+// buildFilePlan は 2 つの yaml を突き合わせて Plan を作る。Google Cloud には接続しない。
+// project / location はファイルごとに違って当然なので比較しない。
+func buildFilePlan[T resource.Item](k kind[T], filePath, againstPath string) (*filePlan[T], error) {
+	// 片方が読めないと「全部そちらに無い」という差分になってしまうので、
+	// ファイル比較のときはパスの間違いをエラーにする。
+	for _, p := range []string{filePath, againstPath} {
+		if _, err := os.Stat(p); err != nil {
+			return nil, fmt.Errorf("%s が読めません: %w", p, err)
+		}
+	}
+
+	file, err := k.loadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	against, err := k.loadFile(againstPath)
+	if err != nil {
+		return nil, err
+	}
+	file.Sort()
+	against.Sort()
+
+	// ignore_change は両方のファイルに書ける。dev と prod で意図的に変えている
+	// プロパティを黙らせたいので、両方の和集合を適用する。
+	ignore := make([]string, 0, len(file.GetIgnoreChange())+len(against.GetIgnoreChange()))
+	ignore = append(ignore, file.GetIgnoreChange()...)
+	ignore = append(ignore, against.GetIgnoreChange()...)
+
+	againstIgnore := make(map[string][]string, len(against.GetItems()))
+	for _, item := range against.GetItems() {
+		if len(item.ItemIgnoreChange()) > 0 {
+			againstIgnore[item.ItemName()] = item.ItemIgnoreChange()
+		}
+		// against 側の ignore_change は比較対象のプロパティではないので落とす。
+		item.SetItemIgnoreChange(nil)
+	}
+	for _, item := range file.GetItems() {
+		extra, ok := againstIgnore[item.ItemName()]
+		if !ok {
+			continue
+		}
+		merged := make([]string, 0, len(item.ItemIgnoreChange())+len(extra))
+		merged = append(merged, item.ItemIgnoreChange()...)
+		merged = append(merged, extra...)
+		item.SetItemIgnoreChange(merged)
+	}
+
+	plan, err := resource.BuildPlan(file.GetProject(), file.GetLocation(),
+		ignore, file.GetItems(), against.GetItems(), k.newItem)
+	if err != nil {
+		return nil, err
+	}
+	return &filePlan[T]{plan: plan, file: file, against: against}, nil
 }

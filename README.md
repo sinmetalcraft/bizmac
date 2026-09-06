@@ -69,6 +69,45 @@ bizmac diff scheduler
 bizmac diff cloudtasks --exit-code    # 差分があれば exit code 1
 ```
 
+#### ファイル同士を比べる
+
+`--against` に別の yaml を指定すると、Google Cloud には接続せずにファイル同士を比較する。
+dev と prod の設定がどれだけ離れているかを見るのに使う。
+
+```
+bizmac diff cloudtasks -f dev/cloudtasks.yaml --against prod/cloudtasks.yaml
+```
+
+`--file` をあるべき姿、`--against` を現状として扱うので、差分の向きは通常の `diff` と同じ。
+
+```
+file:    dev/cloudtasks.yaml (project: dev-project, location: asia-northeast1)
+against: prod/cloudtasks.yaml (project: prod-project, location: asia-northeast1)
+
++ dev-only-queue (--file にのみあります)
+    - name: dev-only-queue
+      rate_limits:
+        max_dispatches_per_second: 1
+~ circle-count
+    ~ rate_limits.max_dispatches_per_second: 200 => 50
+- prod-only-queue (--against にのみあります)
+
+only in --file: 1, different: 1, same: 45, only in --against: 1
+```
+
+- `project` / `location` は環境ごとに違って当然なので比較しない。見出しに両方を出すだけ。
+- `ignore_change` は両方のファイルのものが効く。環境ごとに意図的に変えているプロパティは
+  どちらか片方に書いておけば黙る。
+- `--exit-code` は同じように使える。
+- どちらかのファイルが読めない場合はエラーになる（片方が空だと全件差分になってしまうため）。
+
+なお `-p` / `-l` は yaml の `project` / `location` を上書きするので、
+「dev の yaml を prod の実物に当てる」ことは `--against` なしでもできる。
+
+```
+bizmac diff cloudtasks -f dev/cloudtasks.yaml -p prod-project
+```
+
 出力例:
 
 ```
