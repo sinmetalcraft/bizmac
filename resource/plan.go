@@ -18,6 +18,8 @@ type Plan[T Item] struct {
 	Update []*Update[T]
 	// Delete は Google Cloud にあって yaml に無いリソース。vacuum の対象。
 	Delete []T
+	// Revoke は yaml から外れた付与 (Grants) を持つリソース。vacuum の対象。
+	Revoke []*Revoke[T]
 	// NoChange は差分の無いリソース。
 	NoChange []T
 }
@@ -25,6 +27,11 @@ type Plan[T Item] struct {
 // HasChange は update で適用すべき変更があるかを返す。
 func (p *Plan[T]) HasChange() bool {
 	return len(p.Create) > 0 || len(p.Update) > 0
+}
+
+// HasVacuum は vacuum で適用すべき変更があるかを返す。
+func (p *Plan[T]) HasVacuum() bool {
+	return len(p.Delete) > 0 || len(p.Revoke) > 0
 }
 
 // Update は既存リソース 1 件の更新内容。
@@ -41,6 +48,17 @@ type Update[T Item] struct {
 	// RecreateRequired は RecreateKey が変わっていて update では適用できない場合に true。
 	// この場合は一度削除して作り直す必要がある。
 	RecreateRequired bool
+}
+
+// Revoke は既存リソース 1 件の、yaml から外れた付与の取り消し内容。
+type Revoke[T Item] struct {
+	// Name はリソース ID。
+	Name string
+	// Desired は Google Cloud 側の現在の定義から、取り消す要素だけを除いたもの。
+	// 付与の追加や他のプロパティの変更は含まない。
+	Desired T
+	// Changes は取り消す要素。すべて IsElement が true の Removed。
+	Changes []prop.Change
 }
 
 // BuildPlan は yaml の定義 (want) と Google Cloud の現状 (actual) を比較して Plan を作る。
@@ -68,15 +86,20 @@ func BuildPlan[T Item](project, location string, ignore []string, want, actual [
 			continue
 		}
 
-		u, err := buildUpdate(ignore, w, got, newItem)
+		u, r, err := buildUpdate(ignore, w, got, newItem)
 		if err != nil {
 			return nil, fmt.Errorf("%q: %w", w.ItemName(), err)
 		}
-		if len(u.Changes) == 0 {
+		if len(u.Changes) == 0 && r == nil {
 			p.NoChange = append(p.NoChange, got)
 			continue
 		}
-		p.Update = append(p.Update, u)
+		if len(u.Changes) > 0 {
+			p.Update = append(p.Update, u)
+		}
+		if r != nil {
+			p.Revoke = append(p.Revoke, r)
+		}
 	}
 
 	for _, a := range actual {
@@ -88,24 +111,25 @@ func BuildPlan[T Item](project, location string, ignore []string, want, actual [
 	return p, nil
 }
 
-func buildUpdate[T Item](ignore []string, want, got T, newItem func() T) (*Update[T], error) {
+// buildUpdate は 1 件分の更新内容を作る。付与の取り消しがある場合は Revoke も返す。
+func buildUpdate[T Item](ignore []string, want, got T, newItem func() T) (*Update[T], *Revoke[T], error) {
 	// body/body_json のような同義表現をそろえてから比較する。
 	wantCanon, err := cloneItem(want, newItem)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	gotCanon, err := cloneItem(got, newItem)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	desiredTree, err := prop.Normalize(wantCanon)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	actualTree, err := prop.Normalize(gotCanon)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// ignore_change は Google Cloud 側に存在しないメタ情報なので比較対象から外す。
 	prop.Delete(desiredTree, "ignore_change")
@@ -124,20 +148,57 @@ func buildUpdate[T Item](ignore []string, want, got T, newItem func() T) (*Updat
 		}
 	}
 
-	changes := prop.Diff(actualTree, merged)
+	var grantPaths []string
+	if g, ok := any(want).(Grants); ok {
+		grantPaths = g.GrantPaths()
+	}
+	changes := prop.DiffSets(actualTree, merged, grantPaths)
+
+	// 付与の取り消しは update から外して vacuum に回す。
+	// update では Google Cloud 側の要素を残し、vacuum では現状から取り消す要素だけを除く。
+	var keep, revokes []prop.Change
+	for _, c := range changes {
+		if c.IsElement() && c.Type == prop.Removed {
+			revokes = append(revokes, c)
+			continue
+		}
+		keep = append(keep, c)
+	}
+	var revoke *Revoke[T]
+	if len(revokes) > 0 {
+		revoked := prop.CopyTree(actualTree)
+		for _, c := range revokes {
+			prop.RevertElement(merged, c)
+			prop.ApplyElement(revoked, c)
+		}
+		r := newItem()
+		if err := prop.Decode(revoked, r); err != nil {
+			return nil, nil, err
+		}
+		if err := r.Canonicalize(); err != nil {
+			return nil, nil, err
+		}
+		revoke = &Revoke[T]{Name: want.ItemName(), Desired: r, Changes: revokes}
+	}
 
 	desired := newItem()
 	if err := prop.Decode(merged, desired); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if len(revokes) > 0 {
+		// 足し戻した要素の並びをそろえる。
+		if err := desired.Canonicalize(); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	return &Update[T]{
 		Name:             want.ItemName(),
 		Actual:           gotCanon,
 		Desired:          desired,
-		Changes:          changes,
+		Changes:          keep,
 		RecreateRequired: desired.RecreateKey() != gotCanon.RecreateKey(),
-	}, nil
+	}, revoke, nil
 }
 
 // ignorePaths はファイル全体とリソース個別の ignore_change を結合して返す。

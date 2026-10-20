@@ -164,3 +164,94 @@ func TestCopyPathIfAbsent_missingInBoth(t *testing.T) {
 		t.Errorf("desired = %v, want 空", desired)
 	}
 }
+
+func changeLines(changes []prop.Change) []string {
+	lines := make([]string, 0, len(changes))
+	for _, c := range changes {
+		lines = append(lines, c.String())
+	}
+	return lines
+}
+
+func TestDiffSets(t *testing.T) {
+	// 集合は並び順を無視して要素単位で比べる。map のキーに "." があっても扱える。
+	actual := prop.Tree{
+		"roles": []any{"roles/a", "roles/b", "roles/d"},
+		"policy": map[string]any{
+			"roles/iam.x": []any{"user:a@example.com"},
+			"roles/iam.y": []any{"user:b@example.com"},
+		},
+		"order": []any{"x", "y"},
+	}
+	desired := prop.Tree{
+		"roles": []any{"roles/d", "roles/c", "roles/a"},
+		"policy": map[string]any{
+			"roles/iam.x": []any{"user:a@example.com", "user:c@example.com"},
+			"roles/iam.z": []any{"user:d@example.com"},
+		},
+		"order": []any{"y", "x"},
+	}
+
+	got := changeLines(prop.DiffSets(actual, desired, []string{"roles", "policy.*"}))
+	want := []string{
+		// 集合でない配列は従来どおり位置で比べる。
+		`~ order[0]: "x" => "y"`,
+		`~ order[1]: "y" => "x"`,
+		`+ policy.roles/iam.x: "user:c@example.com"`,
+		`- policy.roles/iam.y: "user:b@example.com"`,
+		`+ policy.roles/iam.z: "user:d@example.com"`,
+		`- roles: "roles/b"`,
+		`+ roles: "roles/c"`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DiffSets() =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestDiffSets_wholeSetAddedOrRemoved(t *testing.T) {
+	// 集合を含むプロパティが丸ごと増減した場合も要素単位になる。
+	actual := prop.Tree{"policy": map[string]any{"r": []any{"user:a"}}}
+	desired := prop.Tree{"roles": []any{"roles/a"}}
+
+	got := changeLines(prop.DiffSets(actual, desired, []string{"roles", "policy.*"}))
+	want := []string{`- policy.r: "user:a"`, `+ roles: "roles/a"`}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DiffSets() = %q, want %q", got, want)
+	}
+	for _, c := range prop.DiffSets(actual, desired, []string{"roles", "policy.*"}) {
+		if !c.IsElement() {
+			t.Errorf("%s: IsElement() = false, want true", c)
+		}
+	}
+}
+
+func TestApplyElement(t *testing.T) {
+	sets := []string{"roles", "policy.*"}
+	actual := prop.Tree{
+		"roles":  []any{"roles/a", "roles/b"},
+		"policy": map[string]any{"roles/iam.x": []any{"user:a"}},
+	}
+	desired := prop.Tree{"roles": []any{"roles/a", "roles/c"}}
+	changes := prop.DiffSets(actual, desired, sets)
+
+	// 差分をすべて適用すると desired と同じ差分なしの状態になる。
+	applied := prop.CopyTree(actual)
+	for _, c := range changes {
+		prop.ApplyElement(applied, c)
+	}
+	if d := prop.DiffSets(applied, desired, sets); len(d) != 0 {
+		t.Errorf("ApplyElement 後も差分があります: %v (tree: %v)", d, applied)
+	}
+	// 空になった集合と map は取り除かれる。
+	if _, ok := applied["policy"]; ok {
+		t.Errorf("policy = %v, want 取り除かれている", applied["policy"])
+	}
+
+	// 適用したものを戻すと actual に戻る。
+	for _, c := range changes {
+		prop.RevertElement(applied, c)
+	}
+	if d := prop.DiffSets(actual, applied, sets); len(d) != 0 {
+		t.Errorf("RevertElement 後に差分があります: %v", d)
+	}
+}

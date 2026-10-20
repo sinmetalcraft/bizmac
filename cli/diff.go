@@ -36,7 +36,7 @@ func newDiffCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 				if err := printFilePlan(cmd.OutOrStdout(), flags.file, against, fp); err != nil {
 					return err
 				}
-				if exitCode && (fp.plan.HasChange() || len(fp.plan.Delete) > 0) {
+				if exitCode && (fp.plan.HasChange() || fp.plan.HasVacuum()) {
 					return &exitError{code: 1}
 				}
 				return nil
@@ -49,14 +49,14 @@ func newDiffCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 			if err := printPlan(cmd.OutOrStdout(), plan); err != nil {
 				return err
 			}
-			if exitCode && (plan.HasChange() || len(plan.Delete) > 0) {
+			if exitCode && (plan.HasChange() || plan.HasVacuum()) {
 				// CI で差分の有無を判定できるようにする。
 				return &exitError{code: 1}
 			}
 			return nil
 		},
 	}
-	flags.bind(cmd, k.defaultFile)
+	flags.bind(cmd, k.defaultFile, k.global)
 	cmd.Flags().BoolVar(&exitCode, "exit-code", false, "差分がある場合に exit code 1 で終了する")
 	cmd.Flags().StringVar(&against, "against", "",
 		"比較対象の yaml ファイル。指定すると Google Cloud ではなくファイル同士を比較する")
