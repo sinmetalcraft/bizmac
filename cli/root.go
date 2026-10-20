@@ -29,6 +29,7 @@ func NewRootCmd() *cobra.Command {
 	kinds := []cmdSet{
 		buildCmds(schedulerKind()),
 		buildCmds(cloudtasksKind()),
+		buildCmds(serviceaccountKind()),
 	}
 	for _, k := range kinds {
 		export.AddCommand(k.export)
@@ -47,10 +48,13 @@ type targetFlags struct {
 	location string
 }
 
-func (f *targetFlags) bind(cmd *cobra.Command, defaultFile string) {
+// bind はフラグを登録する。global なリソースには --location を付けない。
+func (f *targetFlags) bind(cmd *cobra.Command, defaultFile string, global bool) {
 	cmd.Flags().StringVarP(&f.file, "file", "f", defaultFile, "リソース定義の yaml ファイル")
 	cmd.Flags().StringVarP(&f.project, "project", "p", "", "Google Cloud のプロジェクト ID (yaml の project を上書きする)")
-	cmd.Flags().StringVarP(&f.location, "location", "l", "", "ロケーション ID (yaml の location を上書きする)")
+	if !global {
+		cmd.Flags().StringVarP(&f.location, "location", "l", "", "ロケーション ID (yaml の location を上書きする)")
+	}
 }
 
 // confirm は y/N の確認を取る。EOF や y 以外の入力は false を返す。

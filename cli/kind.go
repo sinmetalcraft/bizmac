@@ -20,6 +20,9 @@ type kind[T resource.Item] struct {
 	resourceLabel string
 	// defaultFile は --file の既定値。
 	defaultFile string
+	// global はロケーションを持たないリソースで true にする (IAM など)。
+	// --location を受け付けず、yaml にも location を書かない。
+	global bool
 	// newFile は空の設定ファイルを作る。export の書き出しに使う。
 	newFile func() resource.File[T]
 	// loadFile は設定ファイルを読む。ファイルが無い場合は空の File を返す。
@@ -65,7 +68,7 @@ func loadFile[T resource.Item](k kind[T], flags *targetFlags) (resource.File[T],
 	if file.GetProject() == "" {
 		return nil, fmt.Errorf("project が指定されていません。%s に project を書くか --project を指定してください", flags.file)
 	}
-	if file.GetLocation() == "" {
+	if !k.global && file.GetLocation() == "" {
 		return nil, fmt.Errorf("location が指定されていません。%s に location を書くか --location を指定してください", flags.file)
 	}
 	return file, nil
@@ -84,6 +87,15 @@ func buildPlan[T resource.Item](cmd *cobra.Command, k kind[T], flags *targetFlag
 		return nil, err
 	}
 	defer svc.Close()
+
+	// yaml に書いたものだけを管理する種別では、yaml の名前だけを List させる。
+	if s, ok := svc.(resource.Scoped); ok {
+		names := make([]string, 0, len(file.GetItems()))
+		for _, item := range file.GetItems() {
+			names = append(names, item.ItemName())
+		}
+		s.SetScope(names)
+	}
 
 	actual, err := svc.List(ctx, file.GetProject(), file.GetLocation())
 	if err != nil {
@@ -108,6 +120,8 @@ type filePlan[T resource.Item] struct {
 	file resource.File[T]
 	// against は --against 側 (現状として扱う)。
 	against resource.File[T]
+	// global はロケーションを持たないリソースかどうか。
+	global bool
 }
 
 // buildFilePlan は 2 つの yaml を突き合わせて Plan を作る。Google Cloud には接続しない。
@@ -162,5 +176,5 @@ func buildFilePlan[T resource.Item](k kind[T], filePath, againstPath string) (*f
 	if err != nil {
 		return nil, err
 	}
-	return &filePlan[T]{plan: plan, file: file, against: against}, nil
+	return &filePlan[T]{plan: plan, file: file, against: against, global: k.global}, nil
 }

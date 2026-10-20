@@ -42,7 +42,7 @@ func newExportCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 			if project == "" {
 				return fmt.Errorf("project が指定されていません。--project を指定してください")
 			}
-			if location == "" {
+			if !k.global && location == "" {
 				return fmt.Errorf("location が指定されていません。--location を指定してください")
 			}
 
@@ -52,6 +52,16 @@ func newExportCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 				return err
 			}
 			defer svc.Close()
+
+			// yaml に書いたものだけを管理する種別では、既存ファイルに書いたものだけを
+			// 書き出す。既存ファイルが空なら、たたき台としてすべてを書き出す。
+			if s, ok := svc.(resource.Scoped); ok && len(existing.GetItems()) > 0 {
+				names := make([]string, 0, len(existing.GetItems()))
+				for _, e := range existing.GetItems() {
+					names = append(names, e.ItemName())
+				}
+				s.SetScope(names)
+			}
 
 			items, err := svc.List(ctx, project, location)
 			if err != nil {
@@ -93,7 +103,7 @@ func newExportCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 			return nil
 		},
 	}
-	flags.bind(cmd, k.defaultFile)
+	flags.bind(cmd, k.defaultFile, k.global)
 	cmd.Flags().StringVarP(&output, "output", "o", "", "書き出し先。既定は --file と同じ。- を指定すると標準出力へ書き出す")
 	return cmd
 }

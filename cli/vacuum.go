@@ -34,14 +34,26 @@ func newVacuumCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 			out := cmd.OutOrStdout()
 			printHeader(out, plan)
 
-			if len(plan.Delete) == 0 {
+			if !plan.HasVacuum() {
 				fmt.Fprintf(out, "削除対象の%sはありません。\n", k.itemLabel)
 				return nil
 			}
 			for _, item := range plan.Delete {
 				fmt.Fprintf(out, "- %s\n", item.ItemName())
 			}
-			fmt.Fprintf(out, "\n%d 件の%sが削除対象です。\n", len(plan.Delete), k.itemLabel)
+			for _, r := range plan.Revoke {
+				fmt.Fprintf(out, "~ %s\n", r.Name)
+				for _, c := range r.Changes {
+					fmt.Fprintf(out, "    %s\n", c)
+				}
+			}
+			fmt.Fprintln(out)
+			if len(plan.Delete) > 0 {
+				fmt.Fprintf(out, "%d 件の%sが削除対象です。\n", len(plan.Delete), k.itemLabel)
+			}
+			if len(plan.Revoke) > 0 {
+				fmt.Fprintf(out, "%d 件の%sで、yaml に無い割り当てを取り消します。\n", len(plan.Revoke), k.itemLabel)
+			}
 			if k.vacuumWarning != "" {
 				fmt.Fprintf(out, "警告: %s\n", k.vacuumWarning)
 			}
@@ -74,10 +86,16 @@ func newVacuumCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 				}
 				fmt.Fprintf(out, "deleted %s\n", item.ItemName())
 			}
+			for _, r := range plan.Revoke {
+				if err := svc.Update(ctx, plan.Project, plan.Location, r.Desired, r.Changes); err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "revoked %s\n", r.Name)
+			}
 			return nil
 		},
 	}
-	flags.bind(cmd, k.defaultFile)
+	flags.bind(cmd, k.defaultFile, k.global)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "削除せずに対象だけを表示する")
 	cmd.Flags().BoolVar(&yes, "yes", false, "確認をスキップして削除する")
 	return cmd

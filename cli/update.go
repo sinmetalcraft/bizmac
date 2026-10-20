@@ -72,7 +72,7 @@ func newUpdateCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 			return nil
 		},
 	}
-	flags.bind(cmd, k.defaultFile)
+	flags.bind(cmd, k.defaultFile, k.global)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "反映せずに実行内容だけを表示する")
 	return cmd
 }

@@ -141,3 +141,45 @@ func TestBuildFilePlan_missingFile(t *testing.T) {
 		t.Error("buildFilePlan() error = nil, want error")
 	}
 }
+
+func TestBuildFilePlan_serviceaccount(t *testing.T) {
+	// prod にだけある割り当ては「--against にのみある割り当て」として出る。
+	dir := t.TempDir()
+	stg := writeFile(t, dir, "stg.yaml", `project: stg-project
+service_accounts:
+  - name: ai-agent
+    project_roles:
+      - roles/spanner.viewer
+      - roles/bigquery.dataViewer
+`)
+	prod := writeFile(t, dir, "prod.yaml", `project: prod-project
+service_accounts:
+  - name: ai-agent
+    project_roles:
+      - roles/bigquery.dataViewer
+      - roles/iam.serviceAccountTokenCreator
+`)
+
+	fp, err := buildFilePlan(serviceaccountKind(), stg, prod)
+	if err != nil {
+		t.Fatalf("buildFilePlan() error: %v", err)
+	}
+	var sb strings.Builder
+	if err := printFilePlan(&sb, stg, prod, fp); err != nil {
+		t.Fatalf("printFilePlan() error: %v", err)
+	}
+	out := sb.String()
+	for _, want := range []string{
+		"(project: stg-project)\n",
+		"~ ai-agent\n    + project_roles: \"roles/spanner.viewer\"\n",
+		"- ai-agent (--against にのみある割り当て)\n    - project_roles: \"roles/iam.serviceAccountTokenCreator\"\n",
+		"only in --file: 0, different: 1, same: 0, only in --against: 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("printFilePlan() の出力に %q がありません:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "location") {
+		t.Errorf("serviceaccount の出力に location が出ています:\n%s", out)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"github.com/sinmetalcraft/bizmac/cloudtasks"
 	"github.com/sinmetalcraft/bizmac/resource"
 	"github.com/sinmetalcraft/bizmac/scheduler"
+	"github.com/sinmetalcraft/bizmac/serviceaccount"
 )
 
 // schedulerKind は Cloud Scheduler のジョブ。
@@ -42,5 +43,25 @@ func cloudtasksKind() kind[*cloudtasks.Queue] {
 			return cloudtasks.NewService(ctx)
 		},
 		vacuumWarning: "キューを削除すると中のタスクは失われ、同じ名前のキューを 7 日間作り直せません。",
+	}
+}
+
+// serviceaccountKind はサービスアカウントと IAM の割り当て。
+func serviceaccountKind() kind[*serviceaccount.ServiceAccount] {
+	return kind[*serviceaccount.ServiceAccount]{
+		name:          "serviceaccount",
+		itemLabel:     "サービスアカウント",
+		resourceLabel: "サービスアカウントと IAM の割り当て",
+		defaultFile:   serviceaccount.DefaultFileName,
+		global:        true,
+		newFile:       func() resource.File[*serviceaccount.ServiceAccount] { return &serviceaccount.File{} },
+		loadFile: func(path string) (resource.File[*serviceaccount.ServiceAccount], error) {
+			return serviceaccount.LoadFile(path)
+		},
+		newItem: func() *serviceaccount.ServiceAccount { return &serviceaccount.ServiceAccount{} },
+		newService: func(ctx context.Context) (resource.Service[*serviceaccount.ServiceAccount], error) {
+			return serviceaccount.NewService(ctx)
+		},
+		vacuumWarning: "割り当てを取り消すと、そのロールに頼っている処理が権限エラーになります。",
 	}
 }

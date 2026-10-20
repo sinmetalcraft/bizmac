@@ -3,7 +3,7 @@
 Infrastructure as code for Google Cloud
 
 Google Cloud のインフラを yaml で管理するための CLI。
-現時点では Cloud Scheduler と Cloud Tasks に対応している。
+現時点では Cloud Scheduler、Cloud Tasks、サービスアカウントと IAM の割り当てに対応している。
 
 ## 名前の由来
 
@@ -40,6 +40,7 @@ gcloud auth application-default login
 | --- | --- | --- |
 | `scheduler` | Cloud Scheduler のジョブ | `scheduler.yaml` |
 | `cloudtasks` | Cloud Tasks のキュー | `cloudtasks.yaml` |
+| `serviceaccount` | サービスアカウントと、それに付ける IAM の割り当て | `serviceaccount.yaml` |
 
 共通のフラグ:
 
@@ -47,7 +48,7 @@ gcloud auth application-default login
 | --- | --- |
 | `-f, --file` | リソース定義の yaml ファイル。既定はリソースごとのファイル名 |
 | `-p, --project` | プロジェクト ID。yaml の `project` を上書きする |
-| `-l, --location` | ロケーション ID。yaml の `location` を上書きする |
+| `-l, --location` | ロケーション ID。yaml の `location` を上書きする。`serviceaccount` には無い |
 
 ### export
 
@@ -340,6 +341,91 @@ duration は Go の duration 表記（`100ms`, `1h0m0s`）で書く。
 - PULL キューは管理対象外。App Engine 時代の遺物で新規作成もできないため、`export` にも出さず、
   `vacuum` の削除候補にもしない。除外したキューは `note:` として表示する
 - キューを削除すると中のタスクは失われ、**同じ名前のキューを 7 日間作り直せない**
+
+## サービスアカウント (`serviceaccount`)
+
+`_example/serviceaccount.yaml` に一通りの例がある。
+
+```yaml
+project: my-project
+
+service_accounts:
+  - name: ai-agent
+    display_name: AI Agent
+    description: AI エージェントが読み取り専用で調べるときに impersonate する
+    project_roles:
+      - roles/bigquery.dataViewer
+      - roles/spanner.databaseReader
+    iam_policy:
+      roles/iam.serviceAccountTokenCreator:
+        - group:developers@example.com
+```
+
+IAM はロケーションを持たないので、`location` と `--location` は無い。
+
+### サービスアカウントのプロパティ
+
+- `name` — アカウント ID。メールアドレス（`ai-agent@my-project.iam.gserviceaccount.com`）の `@` より前だけを書く
+- `display_name` / `description`
+- `project_roles` — プロジェクト単位でこのサービスアカウントに付けるロール
+- `iam_policy` — このサービスアカウント自体への割り当て。ロール → メンバーの map で、
+  「誰がこのサービスアカウントになりすませるか」などを書く。メンバーは `user:` / `group:` /
+  `serviceAccount:` などの接頭辞付きで書く
+
+ロールとメンバーは順序に意味が無いので、並び順の違いは差分にならない。
+diff は 1 要素ずつ出す。
+
+```
+~ update ai-agent
+    + project_roles: "roles/spanner.viewer"
+- vacuum ai-agent (yaml に無い割り当て)
+    - project_roles: "roles/iam.serviceAccountTokenCreator"
+```
+
+### 管理する範囲
+
+**yaml に書いたサービスアカウントだけを管理する。** プロジェクトにある他のサービスアカウントは
+diff にも vacuum の候補にも出ないので、必要なものから少しずつ yaml に載せられる。
+
+プロジェクトの IAM ポリシーは他の経路で付いた割り当てと同居しているので、
+`project_roles` は **yaml に書いたサービスアカウントがメンバーになっている割り当てだけ**を見る。
+他のメンバーの割り当てには触らない。
+
+- `update` はサービスアカウントの作成、`display_name` / `description` の更新、ロールやメンバーの
+  **追加だけ**を行う
+- yaml から外したロールやメンバーの**取り消しは `vacuum`** が行う。他のリソースの削除と同じく、
+  権限を外す操作を `update` で起こさないため
+- `vacuum` はサービスアカウント自体は削除しない。削除したいときは
+  `gcloud iam service-accounts delete` で消してから yaml から外す
+
+`export` は既存の `--file` に書いてあるサービスアカウントだけを書き出す。
+ファイルが無いか空の場合は、たたき台としてすべてのサービスアカウントを書き出す。
+
+### 扱わないもの
+
+- 条件付きの割り当て（IAM Conditions）— 読み飛ばし、`update` / `vacuum` でもそのまま残す。
+  見つけた場合は `note:` として表示する
+- Compute Engine / App Engine の既定のサービスアカウント（`@developer.gserviceaccount.com` など）—
+  アカウント ID を指定して作れないので管理対象外。`export` で除外したものは `note:` として表示する
+- サービスアカウントキー、`disabled` 状態
+- ユーザーやグループに付けるプロジェクトのロール — ここではサービスアカウントに関わる割り当てだけを扱う
+
+### 必要な権限
+
+bizmac を実行するアカウントには次のロールが要る。
+
+- `roles/iam.serviceAccountAdmin` — サービスアカウントの作成・更新と、サービスアカウント自体の IAM ポリシーの変更
+- `roles/resourcemanager.projectIamAdmin` — プロジェクトの IAM ポリシーの変更
+
+`diff` / `export` だけなら、`iam.serviceAccounts.list` / `iam.serviceAccounts.getIamPolicy` /
+`resourcemanager.projects.getIamPolicy` の権限があれば足りる。
+
+### 制限
+
+- `iam_policy` のロール名には `.` が入るので、`ignore_change` で `iam_policy.roles/xxx` のように
+  ロール単位では指定できない。`iam_policy` 全体なら指定できる
+- 作成直後のサービスアカウントは IAM ポリシーへの反映に少し時間がかかるため、
+  `update` は割り当てに失敗した場合しばらく待って再試行する
 
 ## 制限
 

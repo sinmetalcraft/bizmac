@@ -37,6 +37,15 @@ type ServerDefaults interface {
 	ServerDefaultPaths() []string
 }
 
+// Grants は「付与」を表す集合のプロパティ (IAM のロールやメンバーなど) を持つリソースが
+// 実装する。Item の実装は任意。
+// GrantPaths の配列は並び順を無視して要素単位で差分を取る (書式は prop.DiffSets を参照)。
+// update は要素の追加だけを行い、yaml から外れた要素の取り消しは vacuum が行う。
+// リソースそのものの削除と同じく、権限を外す操作を update で起こさないため。
+type Grants interface {
+	GrantPaths() []string
+}
+
 // File は 1 ファイル分のリソース定義。
 type File[T Item] interface {
 	GetProject() string
@@ -63,6 +72,16 @@ type Service[T Item] interface {
 	// フィールドマスクを差分から組み立てる実装のために使う。
 	Update(ctx context.Context, project, location string, item T, changes []prop.Change) error
 	Delete(ctx context.Context, project, location, name string) error
+}
+
+// Scoped は yaml に書いたリソースだけを管理対象にする Service が実装する。
+// Service の実装は任意。
+// 実装している場合、diff / update / vacuum は List の前に yaml に書いたリソース名を
+// SetScope で渡す。List はその名前のリソースだけを返すので、Google Cloud にあって
+// yaml に無いリソースは vacuum の削除候補にならない。
+// export で SetScope を呼ばない場合は、すべてのリソースを返す。
+type Scoped interface {
+	SetScope(names []string)
 }
 
 // Notes は直近の List で除外したリソースなどの注記を返す。
