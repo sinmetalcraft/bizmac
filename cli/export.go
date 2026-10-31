@@ -55,12 +55,10 @@ func newExportCmdFor[T resource.Item](k kind[T]) *cobra.Command {
 
 			// yaml に書いたものだけを管理する種別では、既存ファイルに書いたものだけを
 			// 書き出す。既存ファイルが空なら、たたき台としてすべてを書き出す。
-			if s, ok := svc.(resource.Scoped); ok && len(existing.GetItems()) > 0 {
-				names := make([]string, 0, len(existing.GetItems()))
-				for _, e := range existing.GetItems() {
-					names = append(names, e.ItemName())
+			if s, ok := svc.(resource.Scoped); ok {
+				if names := scopeNames(existing); len(names) > 0 {
+					s.SetScope(names)
 				}
-				s.SetScope(names)
 			}
 
 			items, err := svc.List(ctx, project, location)

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sinmetalcraft/bizmac/cloudtasks"
+	"github.com/sinmetalcraft/bizmac/dns"
 	"github.com/sinmetalcraft/bizmac/resource"
 	"github.com/sinmetalcraft/bizmac/scheduler"
 	"github.com/sinmetalcraft/bizmac/serviceaccount"
@@ -63,5 +64,25 @@ func serviceaccountKind() kind[*serviceaccount.ServiceAccount] {
 			return serviceaccount.NewService(ctx)
 		},
 		vacuumWarning: "割り当てを取り消すと、そのロールに頼っている処理が権限エラーになります。",
+	}
+}
+
+// dnsKind は Cloud DNS のレコード。
+func dnsKind() kind[*dns.RecordSet] {
+	return kind[*dns.RecordSet]{
+		name:          "dns",
+		itemLabel:     "レコード",
+		resourceLabel: "Cloud DNS のレコード",
+		defaultFile:   dns.DefaultFileName,
+		global:        true,
+		newFile:       func() resource.File[*dns.RecordSet] { return &dns.File{} },
+		loadFile: func(path string) (resource.File[*dns.RecordSet], error) {
+			return dns.LoadFile(path)
+		},
+		newItem: func() *dns.RecordSet { return &dns.RecordSet{} },
+		newService: func(ctx context.Context) (resource.Service[*dns.RecordSet], error) {
+			return dns.NewService(ctx)
+		},
+		vacuumWarning: "レコードを削除すると、その名前は引けなくなります。キャッシュには TTL の間残ります。",
 	}
 }

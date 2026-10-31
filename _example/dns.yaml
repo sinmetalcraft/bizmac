@@ -1,0 +1,30 @@
+project: my-project
+
+managed_zones:
+  # name はマネージドゾーン名 (gcloud dns managed-zones list の NAME)。DNS 名ではない
+  - name: example-com
+    record_sets:
+      # name は末尾を . にした完全修飾ドメイン名で書く
+      - name: example.com.
+        type: A
+        ttl: 300
+        rrdatas:
+          - 192.0.2.1
+          - 192.0.2.2
+      - name: example.com.
+        type: MX
+        ttl: 3600
+        rrdatas:
+          - 1 aspmx.l.google.com.
+          - 5 alt1.aspmx.l.google.com.
+      # TXT の値はダブルクォートを含めて書く
+      - name: example.com.
+        type: TXT
+        ttl: 300
+        rrdatas:
+          - '"v=spf1 include:_spf.google.com ~all"'
+      - name: www.example.com.
+        type: CNAME
+        ttl: 300
+        rrdatas:
+          - example.com.

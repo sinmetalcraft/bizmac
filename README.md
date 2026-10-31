@@ -3,7 +3,7 @@
 Infrastructure as code for Google Cloud
 
 Google Cloud のインフラを yaml で管理するための CLI。
-現時点では Cloud Scheduler、Cloud Tasks、サービスアカウントと IAM の割り当てに対応している。
+現時点では Cloud Scheduler、Cloud Tasks、サービスアカウントと IAM の割り当て、Cloud DNS のレコードに対応している。
 
 ## 名前の由来
 
@@ -41,6 +41,7 @@ gcloud auth application-default login
 | `scheduler` | Cloud Scheduler のジョブ | `scheduler.yaml` |
 | `cloudtasks` | Cloud Tasks のキュー | `cloudtasks.yaml` |
 | `serviceaccount` | サービスアカウントと、それに付ける IAM の割り当て | `serviceaccount.yaml` |
+| `dns` | Cloud DNS のマネージドゾーンの中のレコード | `dns.yaml` |
 
 共通のフラグ:
 
@@ -48,7 +49,7 @@ gcloud auth application-default login
 | --- | --- |
 | `-f, --file` | リソース定義の yaml ファイル。既定はリソースごとのファイル名 |
 | `-p, --project` | プロジェクト ID。yaml の `project` を上書きする |
-| `-l, --location` | ロケーション ID。yaml の `location` を上書きする。`serviceaccount` には無い |
+| `-l, --location` | ロケーション ID。yaml の `location` を上書きする。`serviceaccount` / `dns` には無い |
 
 ### export
 
@@ -426,6 +427,73 @@ bizmac を実行するアカウントには次のロールが要る。
   ロール単位では指定できない。`iam_policy` 全体なら指定できる
 - 作成直後のサービスアカウントは IAM ポリシーへの反映に少し時間がかかるため、
   `update` は割り当てに失敗した場合しばらく待って再試行する
+
+## Cloud DNS (`dns`)
+
+`_example/dns.yaml` に一通りの例がある。
+
+```yaml
+project: my-project
+
+managed_zones:
+  - name: example-com
+    record_sets:
+      - name: example.com.
+        type: A
+        ttl: 300
+        rrdatas:
+          - 192.0.2.1
+      - name: www.example.com.
+        type: CNAME
+        ttl: 300
+        rrdatas:
+          - example.com.
+```
+
+Cloud DNS はロケーションを持たないので、`location` と `--location` は無い。
+
+### プロパティ
+
+- `managed_zones[].name` — マネージドゾーン名（`gcloud dns managed-zones list` の `NAME`）。DNS 名ではない
+- `record_sets[].name` — 末尾を `.` にした完全修飾ドメイン名。小文字で書く
+- `record_sets[].type` — `A` / `AAAA` / `CNAME` / `MX` / `TXT` / `NS` など
+- `record_sets[].ttl` — 秒。必須
+- `record_sets[].rrdatas` — レコードの値。TXT はダブルクォートを含めて書く（`'"v=spf1 -all"'`）
+
+レコードは名前と種類の組で 1 件になる。diff には `<ゾーン名>/<名前> <種類>` で出る。
+
+```
++ create example-com/new.example.com. CNAME
+~ update example-com/example.com. TXT
+    ~ ttl: 5 => 300
+- vacuum example-com/old.example.com. A (yaml に定義がありません)
+```
+
+`rrdatas` は Cloud DNS が書いた順に保持するので、並び順の違いも差分になる。
+
+### 管理する範囲
+
+**yaml に書いたマネージドゾーンの中のレコードだけを管理する。** yaml に書いていないゾーンには触らない。
+
+- ゾーン自体の作成・削除・設定変更（DNSSEC、公開範囲など）は行わない。yaml に書いたゾーンが
+  無い場合はエラーになるので、先に `gcloud dns managed-zones create` で作る
+- ゾーン頂点の `NS` / `SOA` は Cloud DNS がゾーンと一緒に作るので管理対象外。`export` にも出さず、
+  `vacuum` の削除候補にもしない。サブドメインを委任する `NS` は普通のレコードとして扱う
+- `vacuum` は、yaml に書いたゾーンにあって yaml に無いレコードを削除する
+
+`export` は既存の `--file` に書いてあるゾーンのレコードだけを書き出す。
+ファイルが無いか空の場合は、たたき台としてすべてのゾーンのレコードを書き出す。
+
+### 扱わないもの
+
+- ルーティングポリシー（加重ラウンドロビン、位置情報、フェイルオーバー）を使うレコード —
+  読み飛ばし、`vacuum` の削除候補にもしない。見つけた場合は `note:` として表示する
+- DNSSEC の署名（`signatureRrdatas`）
+
+### 必要な権限
+
+`update` / `vacuum` には `roles/dns.admin` が要る（レコードの作成・更新・削除だけに絞った
+事前定義ロールは無い）。`diff` / `export` だけなら `roles/dns.reader` で足りる。
 
 ## 制限
 

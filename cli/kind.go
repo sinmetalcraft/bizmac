@@ -90,11 +90,7 @@ func buildPlan[T resource.Item](cmd *cobra.Command, k kind[T], flags *targetFlag
 
 	// yaml に書いたものだけを管理する種別では、yaml の名前だけを List させる。
 	if s, ok := svc.(resource.Scoped); ok {
-		names := make([]string, 0, len(file.GetItems()))
-		for _, item := range file.GetItems() {
-			names = append(names, item.ItemName())
-		}
-		s.SetScope(names)
+		s.SetScope(scopeNames(file))
 	}
 
 	actual, err := svc.List(ctx, file.GetProject(), file.GetLocation())
@@ -111,6 +107,19 @@ func buildPlan[T resource.Item](cmd *cobra.Command, k kind[T], flags *targetFlag
 		plan.Notes = n.Notes()
 	}
 	return plan, nil
+}
+
+// scopeNames は Scoped な Service に渡す名前を返す。
+// File が ScopeProvider を実装していればそれを、なければリソース名を使う。
+func scopeNames[T resource.Item](file resource.File[T]) []string {
+	if p, ok := file.(resource.ScopeProvider); ok {
+		return p.ScopeNames()
+	}
+	names := make([]string, 0, len(file.GetItems()))
+	for _, item := range file.GetItems() {
+		names = append(names, item.ItemName())
+	}
+	return names
 }
 
 // filePlan は 2 つの yaml を比較した結果。

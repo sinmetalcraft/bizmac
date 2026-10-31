@@ -30,6 +30,7 @@ func NewRootCmd() *cobra.Command {
 		buildCmds(schedulerKind()),
 		buildCmds(cloudtasksKind()),
 		buildCmds(serviceaccountKind()),
+		buildCmds(dnsKind()),
 	}
 	for _, k := range kinds {
 		export.AddCommand(k.export)

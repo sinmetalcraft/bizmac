@@ -84,6 +84,13 @@ type Scoped interface {
 	SetScope(names []string)
 }
 
+// ScopeProvider は Scoped な Service に渡す名前を、リソース名ではなくファイルの内容から
+// 決める File が実装する。File の実装は任意。
+// dns はレコードではなくゾーン単位で管理対象を決めるので、yaml に書いたゾーン名を返す。
+type ScopeProvider interface {
+	ScopeNames() []string
+}
+
 // Notes は直近の List で除外したリソースなどの注記を返す。
 // Service の実装は任意で、満たしている場合だけ CLI が拾って表示する。
 type Notes interface {
