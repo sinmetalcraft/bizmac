@@ -3,7 +3,7 @@
 Infrastructure as code for Google Cloud
 
 Google Cloud のインフラを yaml で管理するための CLI。
-現時点では Cloud Scheduler、Cloud Tasks、サービスアカウントと IAM の割り当て、Cloud DNS のレコードに対応している。
+現時点では Cloud Scheduler、Cloud Tasks、サービスアカウントと IAM の割り当て、Cloud DNS のレコード、Cloud Logging のログベースの指標に対応している。
 
 ## 名前の由来
 
@@ -42,6 +42,7 @@ gcloud auth application-default login
 | `cloudtasks` | Cloud Tasks のキュー | `cloudtasks.yaml` |
 | `serviceaccount` | サービスアカウントと、それに付ける IAM の割り当て | `serviceaccount.yaml` |
 | `dns` | Cloud DNS のマネージドゾーンの中のレコード | `dns.yaml` |
+| `logmetric` | Cloud Logging のログベースの指標 | `logmetric.yaml` |
 
 共通のフラグ:
 
@@ -49,7 +50,7 @@ gcloud auth application-default login
 | --- | --- |
 | `-f, --file` | リソース定義の yaml ファイル。既定はリソースごとのファイル名 |
 | `-p, --project` | プロジェクト ID。yaml の `project` を上書きする |
-| `-l, --location` | ロケーション ID。yaml の `location` を上書きする。`serviceaccount` / `dns` には無い |
+| `-l, --location` | ロケーション ID。yaml の `location` を上書きする。`serviceaccount` / `dns` / `logmetric` には無い |
 
 ### export
 
@@ -494,6 +495,67 @@ Cloud DNS はロケーションを持たないので、`location` と `--locatio
 
 `update` / `vacuum` には `roles/dns.admin` が要る（レコードの作成・更新・削除だけに絞った
 事前定義ロールは無い）。`diff` / `export` だけなら `roles/dns.reader` で足りる。
+
+## ログベースの指標 (`logmetric`)
+
+`_example/logmetric.yaml` に一通りの例がある。
+
+```yaml
+project: my-project
+
+metrics:
+  - name: app_error_count
+    description: アプリが出した ERROR 以上のログの件数
+    filter: >-
+      resource.type="cloud_run_revision"
+      AND log_id("run.googleapis.com/stdout")
+      AND severity>=ERROR
+```
+
+ログベースの指標はロケーションを持たないので、`location` と `--location` は無い。
+
+### プロパティ
+
+Logging API v2 の [LogMetric](https://cloud.google.com/logging/docs/reference/v2/rest/v2/projects.metrics) に対応する。
+
+- `name` — 指標 ID。作る側が決める名前で、フルリソース名ではない。100 文字以内で、`/` で階層を表せる（先頭には書けない）
+- `description`
+- `filter` — 数える対象のログを選ぶクエリ。`logName="projects/<project>/logs/..."` の代わりに
+  `log_id("...")` で書くと、プロジェクト ID を含まないので環境間で同じ filter を使える
+- `metric_descriptor`
+  - `metric_kind` / `value_type` — 省略すると `DELTA` / `INT64`（カウンタ）。**作成後は変えられない**ので、
+    変えると `update` はエラーになる。一度 `vacuum` で消してから作り直す
+  - `unit` / `display_name`
+  - `labels` — `key` / `value_type`（省略すると `STRING`）/ `description`。並び順は差分にならない
+- `label_extractors` — ラベルのキー → 値を取り出す式（`EXTRACT(...)` / `REGEXP_EXTRACT(...)`）。
+  キーは `metric_descriptor.labels` に書いたものに限る
+- `value_extractor` / `bucket_options` — 分布の指標（`value_type: DISTRIBUTION`）でだけ書ける。
+  `bucket_options` は `linear_buckets` / `exponential_buckets` / `explicit_buckets` のいずれか 1 つ
+
+`metric_descriptor` の `metric_kind` / `value_type` / `unit` は、yaml に書かなければ Google Cloud 側の値を
+そのまま使う（Cloud Logging が既定値を埋めるため）。
+
+ログのモニタリング対象リソースのラベル（Cloud Run なら `revision_name` / `service_name` など）は、
+`label_extractors` を書かなくても時系列のラベルとして付く。
+
+### 管理する範囲
+
+プロジェクトのユーザー定義の指標すべてを管理する。yaml に無い指標は `vacuum` の削除候補になるので、
+手で作った指標は先に `export` で取り込む。`logging.googleapis.com/` の組み込みの指標は API の一覧に
+含まれないので対象外。
+
+### 扱わないもの
+
+- `disabled` / `bucket_name`（ログバケットを対象にした指標）/ `version` — yaml に出さず、
+  `update` でも今の値のまま残す。API の更新は全体を置き換えるので、`update` は現在の指標を読んでから
+  yaml で管理しているフィールドだけを書き換えて送る
+
+### 必要な権限
+
+`update` / `vacuum` には `logging.logMetrics.create` / `update` / `delete` が要る。
+`roles/logging.configWriter` に含まれるが、シンクやログバケットの書き込みも含むので、
+必要ならこれらと `logging.logMetrics.list` / `get` だけのカスタムロールを作る。
+`diff` / `export` だけなら `roles/logging.viewer` で足りる。
 
 ## 制限
 

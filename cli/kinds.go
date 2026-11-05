@@ -5,6 +5,7 @@ import (
 
 	"github.com/sinmetalcraft/bizmac/cloudtasks"
 	"github.com/sinmetalcraft/bizmac/dns"
+	"github.com/sinmetalcraft/bizmac/logmetric"
 	"github.com/sinmetalcraft/bizmac/resource"
 	"github.com/sinmetalcraft/bizmac/scheduler"
 	"github.com/sinmetalcraft/bizmac/serviceaccount"
@@ -84,5 +85,25 @@ func dnsKind() kind[*dns.RecordSet] {
 			return dns.NewService(ctx)
 		},
 		vacuumWarning: "レコードを削除すると、その名前は引けなくなります。キャッシュには TTL の間残ります。",
+	}
+}
+
+// logmetricKind は Cloud Logging のログベースの指標。
+func logmetricKind() kind[*logmetric.LogMetric] {
+	return kind[*logmetric.LogMetric]{
+		name:          "logmetric",
+		itemLabel:     "指標",
+		resourceLabel: "Cloud Logging のログベースの指標",
+		defaultFile:   logmetric.DefaultFileName,
+		global:        true,
+		newFile:       func() resource.File[*logmetric.LogMetric] { return &logmetric.File{} },
+		loadFile: func(path string) (resource.File[*logmetric.LogMetric], error) {
+			return logmetric.LoadFile(path)
+		},
+		newItem: func() *logmetric.LogMetric { return &logmetric.LogMetric{} },
+		newService: func(ctx context.Context) (resource.Service[*logmetric.LogMetric], error) {
+			return logmetric.NewService(ctx)
+		},
+		vacuumWarning: "指標を削除すると、それを使っているアラートやダッシュボードにデータが来なくなります。",
 	}
 }
