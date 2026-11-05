@@ -1,0 +1,47 @@
+project: my-project
+
+metrics:
+  # アプリが出した ERROR 以上のログの件数。
+  # Cloud Run のリビジョン名・サービス名はリソースのラベルとして自動で付くので、
+  # label_extractors を書かなくてもリビジョン別に見られる
+  - name: app_error_count
+    description: アプリが出した ERROR 以上のログの件数
+    # log_id() で書くと filter にプロジェクト ID が入らず、環境間で同じ filter を使える
+    filter: >-
+      resource.type="cloud_run_revision"
+      AND log_id("run.googleapis.com/stdout")
+      AND severity>=ERROR
+
+  # ラベルを付けたカウンタ
+  - name: http_5xx_count
+    description: 5xx を返したリクエストの件数
+    filter: >-
+      resource.type="cloud_run_revision"
+      AND httpRequest.status>=500
+    metric_descriptor:
+      metric_kind: DELTA
+      value_type: INT64
+      unit: "1"
+      labels:
+        - key: status
+          value_type: INT64
+          description: HTTP ステータスコード
+    label_extractors:
+      status: EXTRACT(httpRequest.status)
+
+  # 分布の指標
+  - name: request_latency
+    description: リクエストの処理時間
+    filter: >-
+      resource.type="cloud_run_revision"
+      AND jsonPayload.latency_ms:*
+    metric_descriptor:
+      metric_kind: DELTA
+      value_type: DISTRIBUTION
+      unit: ms
+    value_extractor: EXTRACT(jsonPayload.latency_ms)
+    bucket_options:
+      exponential_buckets:
+        num_finite_buckets: 64
+        growth_factor: 1.4
+        scale: 1
